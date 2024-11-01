@@ -430,7 +430,21 @@ def drawSignage(device, width, height, data):
             departures[2]), interval=10)
         rowFourC = snapshot(pw, 10, renderPlatform(departures[2]), interval=config["refreshTime"])
 
-    rowTime = snapshot(width, 14, renderTime, interval=0.1)
+    if len(departures) > 3:
+        rowFiveA = snapshot(width - w - pw, 10, renderDestination(
+            departures[3], font, '4th'), interval=10)
+        rowFiveB = snapshot(w, 10, renderServiceStatus(
+            departures[3]), interval=10)
+        rowFiveC = snapshot(pw, 10, renderPlatform(departures[3]), interval=config["refreshTime"])
+
+    # if len(departures) > 4:
+    #     rowSixA = snapshot(width - w - pw, 10, renderDestination(
+    #         departures[4], font, '5th'), interval=10)
+    #     rowSixB = snapshot(w, 10, renderServiceStatus(
+    #         departures[4]), interval=10)
+    #     rowSixC = snapshot(pw, 10, renderPlatform(departures[4]), interval=config["refreshTime"])
+
+    # rowTime = snapshot(width, 14, renderTime, interval=0.1)
 
     if len(virtualViewport._hotspots) > 0:
         for vhotspot, xy in virtualViewport._hotspots:
@@ -455,7 +469,17 @@ def drawSignage(device, width, height, data):
         virtualViewport.add_hotspot(rowFourB, (width - w, 36))
         virtualViewport.add_hotspot(rowFourC, (width - w - pw, 36))
 
-    virtualViewport.add_hotspot(rowTime, (0, 50))
+    if len(departures) > 3:
+        virtualViewport.add_hotspot(rowFiveA, (0, 48))
+        virtualViewport.add_hotspot(rowFiveB, (width - w, 48))
+        virtualViewport.add_hotspot(rowFiveC, (width - w - pw, 48))
+
+    # if len(departures) > 4:
+    #     virtualViewport.add_hotspot(rowSixA, (0, 60))
+    #     virtualViewport.add_hotspot(rowSixB, (width - w, 60))
+    #     virtualViewport.add_hotspot(rowSixC, (width - w - pw, 60))
+
+    # virtualViewport.add_hotspot(rowTime, (0, 50))
 
     return virtualViewport
 
