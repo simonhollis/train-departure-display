@@ -242,7 +242,12 @@ def renderWelcomeTo(xOffset):
 
 def renderPoweredBy(xOffset):
     def drawText(draw, *_):
-        text = "Powered by"
+        destination = config["journey"]["destinationStation"]
+        if destination == "":
+            text = "> All departures <"
+        else:
+            text = f"Departures to: {destination}"
+        # text = "Powered by"
         draw.text((int(xOffset), 0), text=text, font=fontBold, fill="yellow")
 
     return drawText
@@ -258,7 +263,9 @@ def renderNRE(xOffset):
 
 def renderName(xOffset):
     def drawText(draw, *_):
-        text = "UK Train Departure Display"
+        location = config["journey"]["departureStation"]
+        text = f"Location: {location}"
+        # text = "UK Train Departure Display"
         draw.text((int(xOffset), 0), text=text, font=fontBold, fill="yellow")
 
     return drawText
@@ -308,8 +315,10 @@ def drawStartup(device, width, height):
     virtualViewport = viewport(device, width=width, height=height)
 
     with canvas(device):
-        nameSize = int(fontBold.getlength("UK Train Departure Display"))
-        poweredSize = int(fontBold.getlength("Powered by"))
+        #nameSize = int(fontBold.getlength("UK Train Departure Display"))
+        nameSize = int(fontBold.getlength("Departures to: all"))
+        #poweredSize = int(fontBold.getlength("Powered by"))
+        poweredSize = nameSize
         NRESize = int(fontBold.getlength("National Rail Enquiries"))
 
         rowOne = snapshot(width, 10, renderName((width - nameSize) / 2), interval=10)
