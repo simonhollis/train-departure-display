@@ -35,6 +35,42 @@ def renderDestination(departure, font, pos):
 
     def drawText(draw, *_):
         if config["showDepartureNumbers"]:
+            if pos == "":
+                train = f"{departureTime}  {destinationName}"
+            else:
+                train = f"{pos}  {departureTime}  {destinationName}"
+        else:
+            train = f"{departureTime}  {destinationName}"
+        _, _, bitmap = cachedBitmapText(train, font)
+        draw.bitmap((0, 0), bitmap, fill="yellow")
+
+    return drawText
+
+
+departure_offset = 0
+current_departure = {"expected_departure_time": "<init>", "aimed_departure_time": "<init>", "destination_name": "<init>"}
+
+def renderDestinations(departures, font, start_position):
+    """ Rotate around a list of departures """
+    
+    global departure_offset, current_departure
+    index = departure_offset % len(departures)
+    pos = str(start_position + index) + "th"
+    current_departure = departures[index]
+    departure_offset += 1
+    return renderDestination(current_departure, font, pos)
+    
+    
+    def drawText(draw, *_):
+        global departure_offset
+        index = departure_offset % len(departures)
+        pos = start_position + index
+        departure = departures[index]
+        departureTime = departure["aimed_departure_time"]
+        destinationName = departure["destination_name"]
+        departure_offset += 1
+
+        if config["showDepartureNumbers"]:
             train = f"{pos}  {departureTime}  {destinationName}"
         else:
             train = f"{departureTime}  {destinationName}"
@@ -42,6 +78,14 @@ def renderDestination(departure, font, pos):
         draw.bitmap((0, 0), bitmap, fill="yellow")
 
     return drawText
+
+
+def renderServiceStatuses(departures):
+    # global departure_offset  # Share same variable as destinations to ensure consistency
+    # index = departure_offset % len(departures)
+    # departure = departures[index]
+    global current_departure
+    return renderServiceStatus(current_departure)
 
 
 def renderServiceStatus(departure):
@@ -65,6 +109,11 @@ def renderServiceStatus(departure):
         draw.bitmap((width - w, 0), bitmap, fill="yellow")
     return drawText
 
+def renderPlatforms(departures):
+    global current_departure
+    #index = departure_offset % len(departures)
+    #departure = departures[index]
+    return renderPlatform(current_departure)
 
 def renderPlatform(departure):
     def drawText(draw, *_):
@@ -408,7 +457,7 @@ def drawSignage(device, width, height, data):
         firstFont = fontBold
 
     rowOneA = snapshot(
-        width - w - pw - 5, 10, renderDestination(departures[0], firstFont, '1st'), interval=config["refreshTime"])
+        width - w - pw - 5, 10, renderDestination(departures[0], firstFont, ""), interval=config["refreshTime"])
     rowOneB = snapshot(w, 10, renderServiceStatus(
         departures[0]), interval=10)
     rowOneC = snapshot(pw, 10, renderPlatform(departures[0]), interval=config["refreshTime"])
@@ -431,11 +480,12 @@ def drawSignage(device, width, height, data):
         rowFourC = snapshot(pw, 10, renderPlatform(departures[2]), interval=config["refreshTime"])
 
     if len(departures) > 3:
-        rowFiveA = snapshot(width - w - pw, 10, renderDestination(
-            departures[3], font, '4th'), interval=10)
-        rowFiveB = snapshot(w, 10, renderServiceStatus(
-            departures[3]), interval=10)
-        rowFiveC = snapshot(pw, 10, renderPlatform(departures[3]), interval=config["refreshTime"])
+        #rowFiveA = snapshot(width - w - pw, 10, renderDestination(
+        #    departures[3], font, '4th'), interval=10)
+        rowFiveA = snapshot(width - w - pw, 10, renderDestinations(departures[3:], font, 4), interval=5)
+        rowFiveB = snapshot(w, 10, renderServiceStatuses(
+            departures[3:]), interval=0.5)
+        rowFiveC = snapshot(pw, 10, renderPlatforms(departures[3:]), interval=0.5)
 
     # if len(departures) > 4:
     #     rowSixA = snapshot(width - w - pw, 10, renderDestination(
