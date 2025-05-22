@@ -195,7 +195,11 @@ def ProcessDepartures(journeyConfig, APIOut):
             )
         # print("the " + thisDeparture["aimed_departure_time"] + " calls at " + thisDeparture["calling_at_list"])
 
-        Departures[servicenum] = thisDeparture
+        callingAtStation = journeyConfig["callingAtStation"]
+        if callingAtStation == "" or callingAtStation in thisDeparture["calling_at_list"]:
+            Departures[servicenum] = thisDeparture
+        else:
+            pass # Don't put it in the display
 
     return Departures, departureStationName
 

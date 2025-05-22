@@ -1,5 +1,6 @@
 import os
 import re
+from typing import Dict, Union
 
 # validate platform number
 def parsePlatformData(platform):
@@ -45,6 +46,10 @@ def loadConfig():
     data["journey"]["destinationStation"] = os.getenv("destinationStation") or ""
     if data["journey"]["destinationStation"] == "null" or data["journey"]["destinationStation"] == "undefined":
         data["journey"]["destinationStation"] = ""
+    
+    data["journey"]["callingAtStation"] = os.getenv("callingAtStation") or ""
+    if data["journey"]["callingAtStation"] == "null" or data["journey"]["callingAtStation"] == "undefined":
+        data["journey"]["callingAtStation"] = ""
 
     data["journey"]["individualStationDepartureTime"] = False
     if os.getenv("individualStationDepartureTime") == "True":
