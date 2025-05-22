@@ -1,6 +1,8 @@
 import requests
 import re
 import xmltodict
+import json
+from typing import List, Dict
 
 
 def removeBrackets(originalName):
@@ -70,6 +72,11 @@ def ArrivalOrder(ServicesIN):
     ServicesOUT = sorted(ServicesOUT, key=lambda k: k['sortOrder'])
     return ServicesOUT
 
+def callsAt(target_station, calling_list) -> bool:
+    for station_text in calling_list:
+        if target_station in station_text:  # i.e. a substring
+            return True
+    return False
 
 def ProcessDepartures(journeyConfig, APIOut):
     show_individual_departure_time = journeyConfig["individualStationDepartureTime"]
@@ -193,15 +200,215 @@ def ProcessDepartures(journeyConfig, APIOut):
                 prepareServiceMessage(thisDeparture["operator"]),
                 prepareCarriagesMessage(thisDeparture["carriages"])
             )
-        # print("the " + thisDeparture["aimed_departure_time"] + " calls at " + thisDeparture["calling_at_list"])
 
-        callingAtStation = journeyConfig["callingAtStation"]
-        if callingAtStation == "" or callingAtStation in thisDeparture["calling_at_list"]:
-            Departures[servicenum] = thisDeparture
-        else:
-            pass # Don't put it in the display
+        Departures[servicenum] = thisDeparture
 
     return Departures, departureStationName
+
+
+def processDeparturesForDestination(journeyConfig, APIOut, debug=False):
+    """ Used when we filter by calling point """
+    debug = True # TODO: REMOVE
+    show_individual_departure_time = journeyConfig["individualStationDepartureTime"]
+    APIElements = xmltodict.parse(APIOut)
+    if "soap:Fault" in APIElements['soap:Envelope']['soap:Body']:
+        print(f"soap request resulted in fault")
+        return None, None
+    
+  
+    departureStationName = APIElements['soap:Envelope']['soap:Body']["GetNextDeparturesWithDetailsResponse"]["DeparturesBoard"]['lt4:locationName']
+    services: Dict[str, Dict[str, Dict]] = APIElements['soap:Envelope']['soap:Body']["GetNextDeparturesWithDetailsResponse"]["DeparturesBoard"]['lt7:departures']
+    if debug:
+        print("\nDEBUG: API result\n")
+        print(APIElements['soap:Envelope']['soap:Body']["GetNextDeparturesWithDetailsResponse"])
+        print("\n\nDEBUG: Services\n")
+        print(services)
+        # Example:  Service {'@crs': 'BTH', 'lt7:service': {'lt4:std': '17:30', 'lt4:etd': 'On time', 'lt4:operator': 'Great Western Railway', 'lt4:operatorCode': 'GW', 'lt4:serviceType': 'train', 'lt4:serviceID': '2220854PADTON__', 'lt5:origin': {'lt4:location': {'lt4:locationName': 'London Paddington', 'lt4:crs': 'PAD'}}, 'lt5:destination': {'lt4:location': {'lt4:locationName': 'Taunton', 'lt4:crs': 'TAU'}}, 'lt7:subsequentCallingPoints': {'lt7:callingPointList': {'lt7:callingPoint': [{'lt7:locationName': 'Reading', 'lt7:crs': 'RDG', 'lt7:st': '17:53', 'lt7:et': 'On time'}, {'lt7:locationName': 'Swindon', 'lt7:crs': 'SWI', 'lt7:st': '18:19', 'lt7:et': 'On time'}, {'lt7:locationName': 'Chippenham', 'lt7:crs': 'CPM', 'lt7:st': '18:32', 'lt7:et': 'On time'}, {'lt7:locationName': 'Bath Spa', 'lt7:crs': 'BTH', 'lt7:st': '18:46', 'lt7:et': 'On time'}, {'lt7:locationName': 'Bristol Temple Meads', 'lt7:crs': 'BRI', 'lt7:st': '19:00', 'lt7:et': 'On time'}, {'lt7:locationName': 'Nailsea & Backwell', 'lt7:crs': 'NLS', 'lt7:st': '19:19', 'lt7:et': 'On time'}, {'lt7:locationName': 'Yatton', 'lt7:crs': 'YAT', 'lt7:st': '19:25', 'lt7:et': 'On time'}, {'lt7:locationName': 'Worle', 'lt7:crs': 'WOR', 'lt7:st': '19:31', 'lt7:et': 'On time'}, {'lt7:locationName': 'Weston Milton', 'lt7:crs': 'WNM', 'lt7:st': '19:35', 'lt7:et': 'On time'}, {'lt7:locationName': 'Weston-super-Mare', 'lt7:crs': 'WSM', 'lt7:st': '19:39', 'lt7:et': 'On time'}, {'lt7:locationName': 'Highbridge & Burnham', 'lt7:crs': 'HIG', 'lt7:st': '19:56', 'lt7:et': 'On time'}, {'lt7:locationName': 'Bridgwater', 'lt7:crs': 'BWT', 'lt7:st': '20:04', 'lt7:et': 'On time'}, {'lt7:locationName': 'Taunton', 'lt7:crs': 'TAU', 'lt7:st': '20:16', 'lt7:et': 'On time'}]}}}}
+
+    departures = []
+    departure_sequence = 0
+    for service in services.values():
+        departure = service['lt7:service']
+        details = {}
+        if "lt4:platform" in departure:
+            details["platform"] = departure["lt4:platform"]
+        else:
+            details["platform"] = ""
+
+        details["aimed_departure_time"] = departure["lt4:std"]
+        details["expected_departure_time"] = departure["lt4:etd"]
+        
+        if "lt4:length" in departure:
+                details["carriages"] = departure["lt4:length"]
+        else:
+            details["carriages"] = 0
+
+        if departure["lt4:operator"]:
+            details["operator"] = departure["lt4:operator"]
+
+        details["destination_name"] = removeBrackets(departure["lt5:destination"]["lt4:location"]["lt4:locationName"])
+
+
+        if "lt7:subsequentCallingPoints" in departure:
+            if isinstance(departure['lt7:subsequentCallingPoints']['lt7:callingPointList']['lt7:callingPoint'], dict):
+                # there is only one calling point in the list
+                details["calling_at_list"] = joinWithSpaces(
+                    prepareLocationName(departure['lt7:subsequentCallingPoints']['lt7:callingPointList']['lt7:callingPoint'], show_individual_departure_time),
+                    "only.",
+                    "  --  ",
+                    prepareServiceMessage(details["operator"]),
+                    prepareCarriagesMessage(details["carriages"])
+                )
+            else:  # there are several calling points in the list
+                CallList = [prepareLocationName(i, show_individual_departure_time) for i in departure['lt7:subsequentCallingPoints']['lt7:callingPointList']['lt7:callingPoint']]
+                details["calling_at_list"] = joinWithSpaces(
+                    joinwithCommas(CallList) + ".",
+                    " --  ",
+                    prepareServiceMessage(details["operator"]),
+                    prepareCarriagesMessage(details["carriages"])
+                )
+        else:  # there are no calling points, so just display the destination
+            details["calling_at_list"] = joinWithSpaces(
+                details["destination_name"],
+                "only.",
+                prepareServiceMessage(details["operator"]),
+                prepareCarriagesMessage(details["carriages"])
+            )
+        
+        departures.append(details)
+        departure_sequence += 1
+
+    if len(departures) == 0:
+        return None, departureStationName
+    
+    return departures, departureStationName
+
+    exampleResponse = """
+{
+   "GetNextDeparturesWithDetailsResponse":{
+      "@xmlns":"http://thalesgroup.com/RTTI/2017-10-01/ldb/",
+      "DeparturesBoard":{
+         "@xmlns:lt":"http://thalesgroup.com/RTTI/2012-01-13/ldb/types",
+         "@xmlns:lt8":"http://thalesgroup.com/RTTI/2021-11-01/ldb/types",
+         "@xmlns:lt6":"http://thalesgroup.com/RTTI/2017-02-02/ldb/types",
+         "@xmlns:lt7":"http://thalesgroup.com/RTTI/2017-10-01/ldb/types",
+         "@xmlns:lt4":"http://thalesgroup.com/RTTI/2015-11-27/ldb/types",
+         "@xmlns:lt5":"http://thalesgroup.com/RTTI/2016-02-16/ldb/types",
+         "@xmlns:lt2":"http://thalesgroup.com/RTTI/2014-02-20/ldb/types",
+         "@xmlns:lt3":"http://thalesgroup.com/RTTI/2015-05-14/ldb/types",
+         "lt4:generatedAt":"2025-05-26T16:04:16.1698386+01:00",
+         "lt4:locationName":"London Paddington",
+         "lt4:crs":"PAD",
+         "lt4:platformAvailable":"true",
+         "lt7:departures":{
+            "lt7:destination":{
+               "@crs":"BTH",
+               "lt7:service":{
+                  "lt4:std":"16:30",
+                  "lt4:etd":"On time",
+                  "lt4:operator":"Great Western Railway",
+                  "lt4:operatorCode":"GW",
+                  "lt4:serviceType":"train",
+                  "lt4:serviceID":"2220850PADTON__",
+                  "lt5:origin":{
+                     "lt4:location":{
+                        "lt4:locationName":"London Paddington",
+                        "lt4:crs":"PAD"
+                     }
+                  },
+                  "lt5:destination":{
+                     "lt4:location":{
+                        "lt4:locationName":"Taunton",
+                        "lt4:crs":"TAU"
+                     }
+                  },
+                  "lt7:subsequentCallingPoints":{
+                     "lt7:callingPointList":{
+                        "lt7:callingPoint":[
+                           {
+                              "lt7:locationName":"Reading",
+                              "lt7:crs":"RDG",
+                              "lt7:st":"16:53",
+                              "lt7:et":"On time"
+                           },
+                           {
+                              "lt7:locationName":"Swindon",
+                              "lt7:crs":"SWI",
+                              "lt7:st":"17:19",
+                              "lt7:et":"On time"
+                           },
+                           {
+                              "lt7:locationName":"Chippenham",
+                              "lt7:crs":"CPM",
+                              "lt7:st":"17:32",
+                              "lt7:et":"On time"
+                           },
+                           {
+                              "lt7:locationName":"Bath Spa",
+                              "lt7:crs":"BTH",
+                              "lt7:st":"17:44",
+                              "lt7:et":"On time"
+                           },
+                           {
+                              "lt7:locationName":"Bristol Temple Meads",
+                              "lt7:crs":"BRI",
+                              "lt7:st":"17:57",
+                              "lt7:et":"On time"
+                           },
+                           {
+                              "lt7:locationName":"Nailsea & Backwell",
+                              "lt7:crs":"NLS",
+                              "lt7:st":"18:24",
+                              "lt7:et":"On time"
+                           },
+                           {
+                              "lt7:locationName":"Yatton",
+                              "lt7:crs":"YAT",
+                              "lt7:st":"18:30",
+                              "lt7:et":"On time"
+                           },
+                           {
+                              "lt7:locationName":"Worle",
+                              "lt7:crs":"WOR",
+                              "lt7:st":"18:36",
+                              "lt7:et":"On time"
+                           },
+                           {
+                              "lt7:locationName":"Weston-super-Mare",
+                              "lt7:crs":"WSM",
+                              "lt7:st":"18:42",
+                              "lt7:et":"On time"
+                           },
+                           {
+                              "lt7:locationName":"Highbridge & Burnham",
+                              "lt7:crs":"HIG",
+                              "lt7:st":"18:54",
+                              "lt7:et":"On time"
+                           },
+                           {
+                              "lt7:locationName":"Bridgwater",
+                              "lt7:crs":"BWT",
+                              "lt7:st":"19:01",
+                              "lt7:et":"On time"
+                           },
+                           {
+                              "lt7:locationName":"Taunton",
+                              "lt7:crs":"TAU",
+                              "lt7:st":"19:14",
+                              "lt7:et":"On time"
+                           }
+                        ]
+                     }
+                  }
+               }
+            }
+         }
+      }
+   }
+}
+        
+        """
+
 
 
 def loadDeparturesForStation(journeyConfig, apiKey, rows):
@@ -236,5 +443,47 @@ def loadDeparturesForStation(journeyConfig, apiKey, rows):
     APIOut = requests.post(apiURL, data=APIRequest, headers=headers).text
 
     Departures, departureStationName = ProcessDepartures(journeyConfig, APIOut)
+
+    return Departures, departureStationName
+
+
+
+def loadDeparturesForDestination(journeyConfig, apiKey, rows, debug = False):
+    if journeyConfig["callingAtStation"] == "" and journeyConfig["destinationStation"] == "":
+        raise ValueError(
+            "Please configure the callingAtStation or destinationStation environment variable")
+    
+    # Filter contains contain 1-10 stations
+    if journeyConfig["callingAtStation"] != "":
+        targetStations = journeyConfig["callingAtStation"]
+    else:
+        targetStations = journeyConfig["destinationStation"]
+
+    if apiKey is None:
+        raise ValueError(
+            "Please configure the apiKey environment variable")
+    # https://wiki.openraildata.com/index.php/GetNextDeparturesWithDetails
+    APIRequest = """
+        <x:Envelope xmlns:x="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ldb="http://thalesgroup.com/RTTI/2017-10-01/ldb/" xmlns:typ4="http://thalesgroup.com/RTTI/2013-11-28/Token/types">
+        <x:Header>
+            <typ4:AccessToken><typ4:TokenValue>""" + apiKey + """</typ4:TokenValue></typ4:AccessToken>
+        </x:Header>
+        <x:Body>
+            <ldb:GetNextDeparturesWithDetailsRequest>
+                <ldb:numRows>""" + rows + """</ldb:numRows>
+                <ldb:crs>""" + journeyConfig["departureStation"] + """</ldb:crs>
+                <ldb:timeOffset>""" + journeyConfig["timeOffset"] + """</ldb:timeOffset>
+                <ldb:filterList><ldb:crs>""" + targetStations + """</ldb:crs></ldb:filterList>
+                <ldb:timeWindow>120</ldb:timeWindow>
+            </ldb:GetNextDeparturesWithDetailsRequest>
+        </x:Body>
+    </x:Envelope>"""
+
+    headers = {'Content-Type': 'text/xml'}
+    apiURL = "https://lite.realtime.nationalrail.co.uk/OpenLDBWS/ldb11.asmx"
+
+    APIOut = requests.post(apiURL, data=APIRequest, headers=headers).text
+
+    Departures, departureStationName = processDeparturesForDestination(journeyConfig, APIOut, debug=debug)
 
     return Departures, departureStationName

@@ -6,7 +6,7 @@ import requests
 from datetime import datetime
 from PIL import ImageFont, Image, ImageDraw
 
-from trains import loadDeparturesForStation
+from trains import loadDeparturesForStation, loadDeparturesForDestination
 from config import loadConfig
 from open import isRun
 
@@ -241,12 +241,26 @@ def loadData(apiConfig, journeyConfig, config):
     rows = "10"
 
     try:
-        departures, stationName = loadDeparturesForStation(
-            journeyConfig, apiConfig["apiKey"], rows)
+        if journeyConfig["callingAtStation"] != "":
+            debug_flag = bool(config['debug'])
+            departures, stationName = loadDeparturesForDestination(
+                journeyConfig, apiConfig["apiKey"], rows, debug=debug_flag)
+        else:
+            departures, stationName = loadDeparturesForStation(
+             journeyConfig, apiConfig["apiKey"], rows)
 
         if departures is None:
+            print("No response or no trains returned from API")
             return False, False, stationName
+        
+        if isinstance(departures, list) and len(departures) == 0:
+            print("No trains left after filter - are callingAtStation and destinationStation valid?")
+            return False, False, stationName
+        
+        if "calling_at_list" not in departures[0]:
+            print("No calling list in first departure")
 
+            return False, False, stationName
         firstDepartureDestinations = departures[0]["calling_at_list"]
         return departures, firstDepartureDestinations, stationName
     except requests.RequestException as err:
@@ -364,7 +378,7 @@ def drawBlankSignage(device, width, height, departureStation):
 def platform_filter(departureData, platformNumber, station):
     platformDepartures = []
     for sub in departureData:
-        if platformNumber == "":
+        if platformNumber == "" or platformNumber == "-":
             platformDepartures.append(sub)
         elif sub.get('platform') is not None:
             if sub['platform'] == platformNumber:
