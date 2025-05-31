@@ -51,6 +51,12 @@ def loadConfig():
     if data["journey"]["callingAtStation"] == "null" or data["journey"]["callingAtStation"] == "undefined":
         data["journey"]["callingAtStation"] = ""
 
+    # Set arrivalStation and departureStation to look for all arrivals at a specific spot from a certain location
+    data["journey"]["arrivalStation"] = os.getenv("arrivalStation") or ""
+    if data["journey"]["arrivalStation"] == "null" or data["journey"]["arrivalStation"] == "undefined":
+        data["journey"]["arrivalStation"] = ""
+
+
     data["journey"]["individualStationDepartureTime"] = False
     if os.getenv("individualStationDepartureTime") == "True":
         data["journey"]["individualStationDepartureTime"] = True

@@ -6,7 +6,7 @@ import requests
 from datetime import datetime
 from PIL import ImageFont, Image, ImageDraw
 
-from trains import loadDeparturesForStation, loadDeparturesForDestination
+from trains import loadDeparturesForStation, loadDeparturesForDestination, loadArrivalsAtDestination
 from config import loadConfig
 from open import isRun
 
@@ -30,7 +30,13 @@ def makeFont(name, size):
 
 
 def renderDestination(departure, font, pos):
-    departureTime = departure["aimed_departure_time"]
+    
+    # TODO: This enables renderArrivals without differentiating
+    # That's not really correct
+    if "aimed_departure_time" in departure:
+        departureTime = departure["aimed_departure_time"]
+    elif "aimed_arrival_time" in departure:
+        departureTime = departure["aimed_arrival_time"]
     destinationName = departure["destination_name"]
 
     def drawText(draw, *_):
@@ -48,7 +54,9 @@ def renderServiceStatus(departure):
     def drawText(draw, width, *_):
         train = ""
 
-        if departure["expected_departure_time"] == "On time":
+        if "expected_arrival_time" in departure:
+            train = "Arrival"
+        elif departure["expected_departure_time"] == "On time":
             train = "On time"
         elif departure["expected_departure_time"] == "Cancelled":
             train = "Cancelled"
@@ -241,7 +249,15 @@ def loadData(apiConfig, journeyConfig, config):
     rows = "10"
 
     try:
-        if journeyConfig["callingAtStation"] != "":
+        """ Priority of variable check is
+        1) arrivalStation  (also needs departureStation set as filter)
+        2) callingAtStation
+        3) departureStation """
+        if journeyConfig["arrivalStation"] != "":
+            debug_flag = bool(config['debug'])
+            departures, stationName = loadArrivalsAtDestination(
+                journeyConfig, apiConfig["apiKey"], rows, debug=debug_flag)
+        elif journeyConfig["callingAtStation"] != "":
             debug_flag = bool(config['debug'])
             departures, stationName = loadDeparturesForDestination(
                 journeyConfig, apiConfig["apiKey"], rows, debug=debug_flag)

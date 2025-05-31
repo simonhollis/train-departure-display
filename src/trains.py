@@ -78,30 +78,30 @@ def callsAt(target_station, calling_list) -> bool:
             return True
     return False
 
-def ProcessDepartures(journeyConfig, APIOut):
+def ProcessDepartures(journeyConfig, APIOut, boardType="GetDepBoardWithDetailsResponse"):
     show_individual_departure_time = journeyConfig["individualStationDepartureTime"]
     APIElements = xmltodict.parse(APIOut)
     Services = []
 
     # get departure station name
-    departureStationName = APIElements['soap:Envelope']['soap:Body']['GetDepBoardWithDetailsResponse']['GetStationBoardResult']['lt4:locationName']
+    departureStationName = APIElements['soap:Envelope']['soap:Body'][boardType]['GetStationBoardResult']['lt4:locationName']
 
     # if there are only train services from this station
-    if 'lt7:trainServices' in APIElements['soap:Envelope']['soap:Body']['GetDepBoardWithDetailsResponse']['GetStationBoardResult']:
-        Services = APIElements['soap:Envelope']['soap:Body']['GetDepBoardWithDetailsResponse']['GetStationBoardResult']['lt7:trainServices']['lt7:service']
+    if 'lt7:trainServices' in APIElements['soap:Envelope']['soap:Body'][boardType]['GetStationBoardResult']:
+        Services = APIElements['soap:Envelope']['soap:Body'][boardType]['GetStationBoardResult']['lt7:trainServices']['lt7:service']
         if isinstance(Services, dict):  # if there's only one service, it comes out as a dict
             Services = [Services]       # but it needs to be a list with a single element
 
         # if there are train and bus services from this station
-        if 'lt7:busServices' in APIElements['soap:Envelope']['soap:Body']['GetDepBoardWithDetailsResponse']['GetStationBoardResult']:
-            BusServices = APIElements['soap:Envelope']['soap:Body']['GetDepBoardWithDetailsResponse']['GetStationBoardResult']['lt7:busServices']['lt7:service']
+        if 'lt7:busServices' in APIElements['soap:Envelope']['soap:Body'][boardType]['GetStationBoardResult']:
+            BusServices = APIElements['soap:Envelope']['soap:Body'][boardType]['GetStationBoardResult']['lt7:busServices']['lt7:service']
             if isinstance(BusServices, dict):
                 BusServices = [BusServices]
             Services = ArrivalOrder(Services + BusServices)  # sort the bus and train services into one list in order of scheduled arrival time
 
     # if there are only bus services from this station
-    elif 'lt7:busServices' in APIElements['soap:Envelope']['soap:Body']['GetDepBoardWithDetailsResponse']['GetStationBoardResult']:
-        Services = APIElements['soap:Envelope']['soap:Body']['GetDepBoardWithDetailsResponse']['GetStationBoardResult']['lt7:busServices']['lt7:service']
+    elif 'lt7:busServices' in APIElements['soap:Envelope']['soap:Body'][boardType]['GetStationBoardResult']:
+        Services = APIElements['soap:Envelope']['soap:Body'][boardType]['GetStationBoardResult']['lt7:busServices']['lt7:service']
         if isinstance(Services, dict):
             Services = [Services]
 
@@ -123,10 +123,18 @@ def ProcessDepartures(journeyConfig, APIOut):
             thisDeparture["platform"] = (eachService['lt4:platform'])
 
         # get scheduled departure time
-        thisDeparture["aimed_departure_time"] = eachService["lt4:std"]
+        if "lt4:std" in eachService:
+            thisDeparture["aimed_departure_time"] = eachService["lt4:std"]
 
         # get estimated departure time
-        thisDeparture["expected_departure_time"] = eachService["lt4:etd"]
+        if "lt4:etd" in eachService:
+            thisDeparture["expected_departure_time"] = eachService["lt4:etd"]
+        
+        if "lt4:sta" in eachService:
+            thisDeparture["aimed_arrival_time"] = eachService["lt4:sta"]
+
+        if "lt4:eta" in eachService:
+            thisDeparture["expected_arrival_time"] = eachService["lt4:eta"]
 
         # get carriages, if available
         if 'lt4:length' in eachService:
@@ -485,5 +493,45 @@ def loadDeparturesForDestination(journeyConfig, apiKey, rows, debug = False):
     APIOut = requests.post(apiURL, data=APIRequest, headers=headers).text
 
     Departures, departureStationName = processDeparturesForDestination(journeyConfig, APIOut, debug=debug)
+
+    return Departures, departureStationName
+
+
+
+def loadArrivalsAtDestination(journeyConfig, apiKey, rows, debug = False):
+    """ Search for all arrivals at 'arrivalStation', coming from 'departureStation' """
+    if journeyConfig["arrivalStation"] == "" or journeyConfig["departureStation"] == "":
+        raise ValueError(
+            "Please configure the arrivalStation and departureStation environment variables")
+
+
+    if apiKey is None:
+        raise ValueError(
+            "Please configure the apiKey environment variable")
+    # https://wiki.openraildata.com/index.php/GetArrBoardWithDetails
+    APIRequest = """
+        <x:Envelope xmlns:x="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ldb="http://thalesgroup.com/RTTI/2017-10-01/ldb/" xmlns:typ4="http://thalesgroup.com/RTTI/2013-11-28/Token/types">
+        <x:Header>
+            <typ4:AccessToken><typ4:TokenValue>""" + apiKey + """</typ4:TokenValue></typ4:AccessToken>
+        </x:Header>
+        <x:Body>
+            <ldb:GetArrBoardWithDetailsRequest>
+                <ldb:numRows>""" + rows + """</ldb:numRows>
+                <ldb:crs>""" + journeyConfig["arrivalStation"] + """</ldb:crs>
+                <ldb:timeOffset>""" + journeyConfig["timeOffset"] + """</ldb:timeOffset>
+                <ldb:filterCrs>""" + journeyConfig["departureStation"] + """</ldb:filterCrs>
+                <ldb:filterType>from</ldb:filterType>
+                <ldb:timeWindow>120</ldb:timeWindow>
+            </ldb:GetArrBoardWithDetailsRequest>
+        </x:Body>
+    </x:Envelope>"""
+
+    headers = {'Content-Type': 'text/xml'}
+    apiURL = "https://lite.realtime.nationalrail.co.uk/OpenLDBWS/ldb11.asmx"
+
+    APIOut = requests.post(apiURL, data=APIRequest, headers=headers).text
+
+    # Format is same as departure board
+    Departures, departureStationName = ProcessDepartures(journeyConfig, APIOut, boardType="GetArrBoardWithDetailsResponse")
 
     return Departures, departureStationName
