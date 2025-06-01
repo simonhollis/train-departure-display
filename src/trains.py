@@ -78,13 +78,15 @@ def callsAt(target_station, calling_list) -> bool:
             return True
     return False
 
-def ProcessDepartures(journeyConfig, APIOut, boardType="GetDepBoardWithDetailsResponse"):
-    show_individual_departure_time = journeyConfig["individualStationDepartureTime"]
-    APIElements = xmltodict.parse(APIOut)
+
+def getDepartureStation(APIElements, boardType):
+    return APIElements['soap:Envelope']['soap:Body'][boardType]['GetStationBoardResult']['lt4:locationName']
+
+
+def getServices(APIElements, boardType):
     Services = []
 
-    # get departure station name
-    departureStationName = APIElements['soap:Envelope']['soap:Body'][boardType]['GetStationBoardResult']['lt4:locationName']
+    
 
     # if there are only train services from this station
     if 'lt7:trainServices' in APIElements['soap:Envelope']['soap:Body'][boardType]['GetStationBoardResult']:
@@ -105,65 +107,81 @@ def ProcessDepartures(journeyConfig, APIOut, boardType="GetDepBoardWithDetailsRe
         if isinstance(Services, dict):
             Services = [Services]
 
-    # if there are no trains or buses
     else:
-        Services = None
-        return None, departureStationName
+        # if there are no trains or buses
+        return Services
+    return Services
 
-    # we create a new list of dicts to hold the services
-    Departures = [{}] * len(Services)
 
-    for servicenum, eachService in enumerate(Services):
-        thisDeparture = {}  # create empty dict to populate
-
+def processCommonFields(thisDeparture, service):
         # next we move elements of dict eachService to dict thisDeparture one by one
 
         # get platform, if available
-        if 'lt4:platform' in eachService:
-            thisDeparture["platform"] = (eachService['lt4:platform'])
+        if 'lt4:platform' in service:
+            thisDeparture["platform"] = (service['lt4:platform'])
 
         # get scheduled departure time
-        if "lt4:std" in eachService:
-            thisDeparture["aimed_departure_time"] = eachService["lt4:std"]
+        if "lt4:std" in service:
+            thisDeparture["aimed_departure_time"] = service["lt4:std"]
 
         # get estimated departure time
-        if "lt4:etd" in eachService:
-            thisDeparture["expected_departure_time"] = eachService["lt4:etd"]
+        if "lt4:etd" in service:
+            thisDeparture["expected_departure_time"] = service["lt4:etd"]
         
-        if "lt4:sta" in eachService:
-            thisDeparture["aimed_arrival_time"] = eachService["lt4:sta"]
+        if "lt4:sta" in service:
+            thisDeparture["aimed_arrival_time"] = service["lt4:sta"]
 
-        if "lt4:eta" in eachService:
-            thisDeparture["expected_arrival_time"] = eachService["lt4:eta"]
+        if "lt4:eta" in service:
+            thisDeparture["expected_arrival_time"] = service["lt4:eta"]
 
         # get carriages, if available
-        if 'lt4:length' in eachService:
-            thisDeparture["carriages"] = eachService["lt4:length"]
+        if 'lt4:length' in service:
+            thisDeparture["carriages"] = service["lt4:length"]
         else:
             thisDeparture["carriages"] = 0
 
         # get operator, if available
-        if 'lt4:operator' in eachService:
-            thisDeparture["operator"] = eachService["lt4:operator"]
+        if 'lt4:operator' in service:
+            thisDeparture["operator"] = service["lt4:operator"]
 
         # get name of destination
-        if not isinstance(eachService['lt5:destination']['lt4:location'], list):    # the service only has one destination
-            thisDeparture["destination_name"] = removeBrackets(eachService['lt5:destination']['lt4:location']['lt4:locationName'])
+        if not isinstance(service['lt5:destination']['lt4:location'], list):    # the service only has one destination
+            thisDeparture["destination_name"] = removeBrackets(service['lt5:destination']['lt4:location']['lt4:locationName'])
         else:  # the service splits and has multiple destinations
-            DestinationList = [i['lt4:locationName'] for i in eachService['lt5:destination']['lt4:location']]
+            DestinationList = [i['lt4:locationName'] for i in service['lt5:destination']['lt4:location']]
             thisDeparture["destination_name"] = " & ".join([removeBrackets(i) for i in DestinationList])
 
-        # get via and add to destination name
-        # if 'lt4:via' in eachService['lt5:destination']['lt4:location']:
-        #    thisDeparture["destination_name"] += " " + eachService['lt5:destination']['lt4:location']['lt4:via']
+def ProcessDepartures(journeyConfig, APIOut, boardType="GetDepBoardWithDetailsResponse"):
+    show_individual_departure_time = journeyConfig["individualStationDepartureTime"]
+    APIElements = xmltodict.parse(APIOut)
+    departureStationName = getDepartureStation(APIElements, boardType)
+    Services = getServices(APIElements, boardType)
+    if Services == []:
+        return None, departureStationName
 
+    # we create a new list of dicts to hold the services
+    Departures = [{}] * len(Services)
+    for servicenum, eachService in enumerate(Services):
+        thisDeparture = {}  # create empty dict to populate
+        processCommonFields(thisDeparture, eachService)
+
+        # get via and add to destination name
+        if 'lt4:via' in eachService['lt5:destination']['lt4:location']:
+           thisDeparture["destination_name"] += " " + eachService['lt5:destination']['lt4:location']['lt4:via']
+
+        callingPoints = None
+        if boardType == "GetDepBoardWithDetailsResponse" and "lt7:subsequentCallingPoints" in eachService:
+            callingPoints = eachService["lt7:subsequentCallingPoints"]
+        elif boardType == "GetArrBoardWithDetailsResponse" and "lt7:previousCallingPoints" in eachService:
+            callingPoints = eachService["lt7:previousCallingPoints"]
+            
             # get calling points
-        if 'lt7:subsequentCallingPoints' in eachService:  # there are some calling points
+        if callingPoints is not None:  # there are some calling points
             # check if it is a list of lists    (the train splits, so there are multiple lists of calling points)
             # or a dict                         (the train does not split. There is one list of calling points)
-            if not isinstance(eachService['lt7:subsequentCallingPoints']['lt7:callingPointList'], dict):
+            if not isinstance(callingPoints['lt7:callingPointList'], dict):
                 # there are multiple lists of calling points
-                CallingPointList = eachService['lt7:subsequentCallingPoints']['lt7:callingPointList']
+                CallingPointList = callingPoints['lt7:callingPointList']
                 CallLists = []
                 CallListJoined = []
                 for sectionNum, eachSection in enumerate(CallingPointList):
@@ -184,17 +202,17 @@ def ProcessDepartures(journeyConfig, APIOut, boardType="GetDepBoardWithDetailsRe
                 )
 
             else:  # there is one list of calling points
-                if isinstance(eachService['lt7:subsequentCallingPoints']['lt7:callingPointList']['lt7:callingPoint'], dict):
+                if isinstance(callingPoints['lt7:callingPointList']['lt7:callingPoint'], dict):
                     # there is only one calling point in the list
                     thisDeparture["calling_at_list"] = joinWithSpaces(
-                        prepareLocationName(eachService['lt7:subsequentCallingPoints']['lt7:callingPointList']['lt7:callingPoint'], show_individual_departure_time),
+                        prepareLocationName(callingPoints['lt7:callingPointList']['lt7:callingPoint'], show_individual_departure_time),
                         "only.",
                         "  --  ",
                         prepareServiceMessage(thisDeparture["operator"]),
                         prepareCarriagesMessage(thisDeparture["carriages"])
                     )
                 else:  # there are several calling points in the list
-                    CallList = [prepareLocationName(i, show_individual_departure_time) for i in eachService['lt7:subsequentCallingPoints']['lt7:callingPointList']['lt7:callingPoint']]
+                    CallList = [prepareLocationName(i, show_individual_departure_time) for i in callingPoints['lt7:callingPointList']['lt7:callingPoint']]
                     thisDeparture["calling_at_list"] = joinWithSpaces(
                         joinwithCommas(CallList) + ".",
                         " --  ",
