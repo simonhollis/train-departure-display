@@ -55,18 +55,23 @@ def renderServiceStatus(departure):
         train = ""
 
         if "expected_arrival_time" in departure:
-            train = "Arrival"
-        elif departure["expected_departure_time"] == "On time":
+            expected = departure["expected_arrival_time"]
+        else:
+            expected = departure["expected_departure_time"]
+
+        if expected == "On time":
             train = "On time"
-        elif departure["expected_departure_time"] == "Cancelled":
+        elif expected == "Cancelled":
             train = "Cancelled"
-        elif departure["expected_departure_time"] == "Delayed":
+        elif expected == "Delayed":
             train = "Delayed"
         else:
-            if isinstance(departure["expected_departure_time"], str):
-                train = 'Exp ' + departure["expected_departure_time"]
+            if isinstance(expected, str):
+                train = 'Exp ' + expected
 
-            if departure["aimed_departure_time"] == departure["expected_departure_time"]:
+            if "expected_departure_time" in departure and departure["aimed_departure_time"] == expected:
+                train = "On time"
+            elif "expected_arrival_time" in departure and departure["aimed_arrival_time"] == expected:
                 train = "On time"
 
         w, _, bitmap = cachedBitmapText(train, font)
