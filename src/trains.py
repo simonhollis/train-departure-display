@@ -3,6 +3,7 @@ import re
 import xmltodict
 import json
 from typing import List, Dict
+import datetime
 
 
 def removeBrackets(originalName):
@@ -523,6 +524,13 @@ def loadArrivalsAtDestination(journeyConfig, apiKey, rows, debug = False):
             "Please configure the arrivalStation and departureStation environment variables")
 
 
+    services = fetchNdeparturesForDestinations(apiKey, journeyConfig["departureStation"], journeyConfig["arrivalStation"], 0, 5, debug=True)
+    if True:
+        print("returned services from fetchNdepartures")
+        print(services)
+        
+
+
     if apiKey is None:
         raise ValueError(
             "Please configure the apiKey environment variable")
@@ -553,3 +561,101 @@ def loadArrivalsAtDestination(journeyConfig, apiKey, rows, debug = False):
     Departures, departureStationName = ProcessDepartures(journeyConfig, APIOut, boardType="GetArrBoardWithDetailsResponse")
 
     return Departures, departureStationName
+
+
+def fetchNdeparturesForDestinations(apiKey, departureStation, destinationStations, timeOffset, num_to_fetch, debug = False):
+    debug = True
+    if apiKey is None:
+        raise ValueError(
+            "Please configure the apiKey environment variable")
+    services: List[Dict[str, Dict[str, Dict]]] = []
+    serviceIds = set()
+    timeOffset = str(timeOffset)
+    # https://wiki.openraildata.com/index.php/GetNextDeparturesWithDetails
+    while len(services) < num_to_fetch:
+        if debug:
+            print("timeOffset in request is ", timeOffset)
+        APIRequest = """
+            <x:Envelope xmlns:x="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ldb="http://thalesgroup.com/RTTI/2017-10-01/ldb/" xmlns:typ4="http://thalesgroup.com/RTTI/2013-11-28/Token/types">
+            <x:Header>
+                <typ4:AccessToken><typ4:TokenValue>""" + apiKey + """</typ4:TokenValue></typ4:AccessToken>
+            </x:Header>
+            <x:Body>
+                <ldb:GetNextDeparturesWithDetailsRequest>
+                    <ldb:numRows>""" + "1" + """</ldb:numRows>
+                    <ldb:crs>""" + departureStation + """</ldb:crs>
+                    <ldb:timeOffset>""" + timeOffset + """</ldb:timeOffset>
+                    <ldb:filterList><ldb:crs>""" + destinationStations + """</ldb:crs></ldb:filterList>
+                    <ldb:timeWindow>120</ldb:timeWindow>
+                </ldb:GetNextDeparturesWithDetailsRequest>
+            </x:Body>
+        </x:Envelope>"""
+
+        headers = {'Content-Type': 'text/xml'}
+        apiURL = "https://lite.realtime.nationalrail.co.uk/OpenLDBWS/ldb11.asmx"
+
+        APIOut = requests.post(apiURL, data=APIRequest, headers=headers).text
+        APIElements = xmltodict.parse(APIOut)
+        if "soap:Fault" in APIElements['soap:Envelope']['soap:Body']:
+            print(f"soap request resulted in fault")
+            return None, None
+        
+
+        """
+        DEBUG: new_services
+2025-06-08T22:44:38+01:00  main   {'@crs': 'BTH', 'lt7:service': {'lt4:std': '23:00', 'lt4:etd': 'On time', 'lt4:operator': 'Great Western Railway', 'lt4:operatorCode': 'GW', 'lt4:serviceType': 'train', 'lt4:serviceID': '2633427PADTON__', 'lt5:rsid': 'GW475700', 'lt5:origin': {'lt4:location': {'lt4:locationName': 'London Paddington', 'lt4:crs': 'PAD'}}, 'lt5:destination': {'lt4:location': {'lt4:locationName': 'Bristol Temple Meads', 'lt4:crs': 'BRI'}}, 'lt7:subsequentCallingPoints': {'lt7:callingPointList': {'lt7:callingPoint': [{'lt7:locationName': 'Reading', 'lt7:crs': 'RDG', 'lt7:st': '23:34', 'lt7:et': 'On time'}, {'lt7:locationName': 'Didcot Parkway', 'lt7:crs': 'DID', 'lt7:st': '23:51', 'lt7:et': 'On time'}, {'lt7:locationName': 'Swindon', 'lt7:crs': 'SWI', 'lt7:st': '00:10', 'lt7:et': 'On time'}, {'lt7:locationName': 'Chippenham', 'lt7:crs': 'CPM', 'lt7:st': '00:23', 'lt7:et': 'On time'}, {'lt7:locationName': 'Bath Spa', 'lt7:crs': 'BTH', 'lt7:st': '00:34', 'lt7:et': 'On time'}, {'lt7:locationName': 'Bristol Temple Meads', 'lt7:crs': 'BRI', 'lt7:st': '00:49', 'lt7:et': 'On time'}]}}}}"""
+
+
+        new_services = APIElements['soap:Envelope']['soap:Body']["GetNextDeparturesWithDetailsResponse"]["DeparturesBoard"]['lt7:departures']['lt7:destination']
+        print("DEBUG: new_services\n", new_services)
+        if "lt7:service" in new_services:
+            #services.update(new_services["lt7:service"])
+
+            # Check for no services
+            #  e.g. {'@crs': 'BTH', 'lt7:service': {'@xsi:nil': 'true'}}
+            if "@xsi:nil" in new_services['lt7:service'] and new_services["lt7:service"]["@xsi:nil"] == "true":  
+                if debug:
+                    print("No services found. Returning.")
+                return services
+            id = new_services["lt7:service"]["lt4:serviceID"]
+            if id not in serviceIds:
+                serviceIds.add(id)
+                service_item = {"lt7:service": new_services["lt7:service"]}
+                services.append(service_item)
+            else:
+                print(f"WARNING: detected duplicate service ID: {id}. Will return now.")
+                return services
+        else:
+            # Assume there are no more services:
+            return services
+        if debug:
+            print("Services now are:\n", services)
+        latest_service_time = services[-1]['lt7:service']["lt4:std"]
+        if debug:
+            print("latest service time is ", latest_service_time)
+        # Fetch the service after this one
+        latest_hours = latest_service_time[0:2]  # HH:MM
+        latest_mins = latest_service_time[3:5]
+        now = datetime.datetime.now()
+        now_hours = now.strftime("%H")
+        now_mins = now.strftime("%M")
+   
+        # Calculate one minute longer than previous latest departure
+        now_mins_since_midnight = (int(now_hours) * 60) + int(now_mins)
+        latest_mins_since_midnight = (int(latest_hours) * 60) + int(latest_mins)
+        delta_from_now = latest_mins_since_midnight - now_mins_since_midnight + 1  # + 1 to select next service
+        if delta_from_now < 0:
+            delta_from_now += 24 * 60  # underflow correction
+        timeOffset = str(min(120, delta_from_now)) # 120 is maximum request
+
+        if debug:
+            print(f"\nNdepartures calculated prev departure time was {latest_service_time} ({latest_hours}:{latest_mins}),\nCurrent time is {now_hours}:{now_mins}, so next request will be for {delta_from_now} mins from current time of day.\ntimeOffset is therefore {timeOffset}\n")
+
+        if debug:
+            print("\nDEBUG: API result\n")
+            print(APIElements['soap:Envelope']['soap:Body']["GetNextDeparturesWithDetailsResponse"])
+            print("\n\nDEBUG: Services\n")
+            print("Num services so far: ", len(services))
+            print(services)
+    return services
+        

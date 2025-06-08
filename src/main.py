@@ -262,13 +262,16 @@ def loadData(apiConfig, journeyConfig, config):
         3) departureStation """
         if journeyConfig["arrivalStation"] != "":
             debug_flag = bool(config['debug'])
+            print("using loadArrivalsAtDestination")
             departures, stationName = loadArrivalsAtDestination(
                 journeyConfig, apiConfig["apiKey"], rows, debug=debug_flag)
         elif journeyConfig["callingAtStation"] != "":
             debug_flag = bool(config['debug'])
+            print("using loadDeparturesForDestination")
             departures, stationName = loadDeparturesForDestination(
                 journeyConfig, apiConfig["apiKey"], rows, debug=debug_flag)
         else:
+            print("loadDeparturesForStation")
             departures, stationName = loadDeparturesForStation(
              journeyConfig, apiConfig["apiKey"], rows)
 
